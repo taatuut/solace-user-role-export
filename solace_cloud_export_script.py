@@ -77,7 +77,7 @@ except ImportError:
 BASE_URL        = "https://api.solace.cloud"   # US region
 USERS_ENDPOINT  = "/api/v2/platform/users"
 PAGE_SIZE       = 100
-TIMESTAMP       = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+TIMESTAMP       = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")   # yyyymmddhhMMss
 VALID_FORMATS   = ("csv", "excel", "json", "all")
 
 
@@ -348,8 +348,11 @@ def main():
             "   Or configure:  cp config.example.yaml config.yaml   # then edit"
         )
 
-    output_dir = settings["output_dir"]
-    os.makedirs(output_dir, exist_ok=True)
+    # Each run gets its own timestamped subdirectory under output_dir, e.g.
+    # ./output/20260708142530/ — keeps successive exports from overwriting
+    # or interleaving with each other.
+    run_dir = os.path.join(settings["output_dir"], TIMESTAMP)
+    os.makedirs(run_dir, exist_ok=True)
 
     print("=" * 60)
     print("  Solace Cloud / SAP AEM — User & Role Export")
@@ -358,7 +361,7 @@ def main():
     if args.profile:
         print(f"  Profile    : {args.profile}")
     print(f"  Base URL   : {settings['base_url']}")
-    print(f"  Output dir : {os.path.abspath(output_dir)}")
+    print(f"  Output dir : {os.path.abspath(run_dir)}")
     print(f"  Format(s)  : {settings['format']}")
     print(f"  Run at     : {datetime.now(timezone.utc).isoformat()}")
     print("=" * 60)
@@ -370,17 +373,18 @@ def main():
         print("⚠️  No users returned. Check token permissions.")
         sys.exit(0)
 
-    # Write outputs
+    # Write outputs — filenames no longer need a timestamp suffix since the
+    # parent directory already carries the run's timestamp.
     fmt = settings["format"]
     if fmt in ("csv", "all"):
-        write_csv(users,  os.path.join(output_dir, f"solace_users_roles_{TIMESTAMP}.csv"))
+        write_csv(users,  os.path.join(run_dir, "solace_users_roles.csv"))
     if fmt in ("excel", "all"):
-        write_excel(users, os.path.join(output_dir, f"solace_users_roles_{TIMESTAMP}.xlsx"))
+        write_excel(users, os.path.join(run_dir, "solace_users_roles.xlsx"))
     if fmt in ("json", "all"):
-        write_json(users,  os.path.join(output_dir, f"solace_users_roles_{TIMESTAMP}.json"))
+        write_json(users,  os.path.join(run_dir, "solace_users_roles.json"))
 
     print("\n✅ Export complete!")
-    print(f"   Files written to: {os.path.abspath(output_dir)}/")
+    print(f"   Files written to: {os.path.abspath(run_dir)}/")
 
 
 if __name__ == "__main__":
