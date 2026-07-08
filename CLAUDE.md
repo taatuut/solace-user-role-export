@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A single-purpose Python tool that exports all users and their assigned roles from a Solace Cloud (or SAP AEM) organisation via the Solace Cloud REST API, writing the result as CSV, Excel, and/or JSON. There is exactly one script: `solace_cloud_export_script.py`. There is no package structure, no test suite, and no build step — it's a standalone CLI script plus config plumbing.
+A single-purpose Python tool that exports all users and their assigned roles from a Solace Cloud (or SAP AEM) organisation via the Solace Cloud REST API, writing the result as CSV, Excel, and/or JSON. There are two scripts — `solace_cloud_export_script.py` (the exporter) and `verify_export.py` (a post-run output checker) — and no package structure or build step.
 
 `README.md` is the canonical, detailed reference (API discovery notes, live results, SAP AEM cross-platform validation, troubleshooting). Read it before making non-trivial changes — this file only covers what's needed to be immediately productive.
 
@@ -22,21 +22,28 @@ python3 solace_cloud_export_script.py
 python3 solace_cloud_export_script.py --profile sap_aem   # uses config.yaml profiles.sap_aem
 python3 solace_cloud_export_script.py --help       # full flag list
 
+# Verify the most recently generated output/<yyyymmddhhMMss>/ run
+python3 verify_export.py
+
 # Sanity-check changes without hitting the live API
 python3 -m py_compile solace_cloud_export_script.py
 ```
 
-There are no automated tests, linter, or CI configured. When changing `load_config()`/`resolve_settings()`, verify the precedence logic manually (see "Configuration precedence" below) rather than assuming — it's easy to get the merge order backwards.
+Always invoke Python as `python3` (never bare `python`) and pip as `python3 -m pip` (never bare `pip`) in code, docstrings, and README — this is a deliberate repo convention, not an oversight, since bare `python`/`pip` can resolve to the wrong interpreter depending on the machine.
+
+There are no automated tests, linter, or CI configured beyond `verify_export.py`, which checks a run's *output* (file presence, cross-format row-count consistency, Excel sheet sanity) rather than the script's logic. When changing `load_config()`/`resolve_settings()`, verify the precedence logic manually (see "Configuration precedence" below) rather than assuming — it's easy to get the merge order backwards.
 
 ## Architecture
 
-Everything lives in `solace_cloud_export_script.py`, structured as:
+`solace_cloud_export_script.py` is structured as:
 
 - `load_config(path)` — loads `config.yaml` if present, returns `{}` if not. The config file is always optional; the script must keep working with CLI flags / env var alone.
 - `resolve_settings(args, config)` — merges CLI args, an optional named `--profile` section from `config.yaml`, the `SOLACE_API_TOKEN` env var (token only), and built-in defaults, in that precedence order (CLI > config/profile > env var > default). This is the piece most likely to need care when adding a new setting — every new setting needs a slot in `config.example.yaml`, in `resolve_settings()`, and in `parse_args()` with a `None` default (so "not passed" is distinguishable from "passed the same as the default").
 - `fetch_all_users(base_url, token, role_sep)` — pagination loop against `GET /api/v2/platform/users`, stopping when `meta.pagination.nextPage` is `null`. Roles come embedded in each user object; there is no per-user role lookup.
 - `write_csv()` / `write_excel()` / `write_json()` — the three output writers. Excel writes three sheets (All Users, Admins, Role Summary) via `_format_sheet()` for consistent styling.
 - `main()` — wires the above together: resolve settings, fail fast if no token, fetch, write.
+
+`verify_export.py` is separate and read-only with respect to `output/` — it never regenerates or modifies export files, only inspects the most recent (or a specified) `output/<yyyymmddhhMMss>/` directory and cross-checks CSV/JSON/Excel against each other. It shares the filename constants (`solace_users_roles.csv/.xlsx/.json`) with the exporter by convention, not by import — keep them in sync manually if either changes.
 
 ### Configuration model (`config.yaml` / `config.example.yaml`)
 

@@ -32,7 +32,7 @@ only) > built-in default. config.yaml is entirely optional — the script
 runs the same as before if it is absent.
 
 Requirements:
-    pip install -r requirements.txt   # requests, pandas, openpyxl, PyYAML
+    python3 -m pip install -r requirements.txt   # requests, pandas, openpyxl, PyYAML
 
 Notes:
   - Confirmed working against Solace Cloud org "<tenant>" (US region, 2026-06-30)
@@ -56,18 +56,18 @@ from pathlib import Path
 try:
     import requests
 except ImportError:
-    sys.exit("❌ Missing: pip install requests")
+    sys.exit("❌ Missing: python3 -m pip install requests")
 
 try:
     import pandas as pd
     from openpyxl.styles import Font, PatternFill, Alignment
 except ImportError:
-    sys.exit("❌ Missing: pip install pandas openpyxl")
+    sys.exit("❌ Missing: python3 -m pip install pandas openpyxl")
 
 try:
     import yaml
 except ImportError:
-    sys.exit("❌ Missing: pip install PyYAML")
+    sys.exit("❌ Missing: python3 -m pip install PyYAML")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

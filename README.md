@@ -456,13 +456,16 @@ See `solace_cloud_export_script.py` for the full, current source — it is not d
 
 ```bash
 # 1. Install dependencies
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 
 # 2. Set your token as an environment variable
 export SOLACE_API_TOKEN="eyJhbGci..."
 
 # 3. Run with default settings (all output formats, ./output)
 python3 solace_cloud_export_script.py
+
+# 4. Verify the output that was just written
+python3 verify_export.py
 ```
 
 Or, using `config.yaml` instead of the env var (see section 7):
@@ -470,6 +473,22 @@ Or, using `config.yaml` instead of the env var (see section 7):
 ```bash
 cp config.example.yaml config.yaml   # edit with your token
 python3 solace_cloud_export_script.py
+python3 verify_export.py
+```
+
+### Verifying Output
+
+`verify_export.py` auto-detects the most recent `output/<yyyymmddhhMMss>/` run directory and cross-checks it: all generated files are present and non-empty, CSV/JSON/Excel row counts agree with each other, the Excel `Admins` sheet matches `is_admin == True` rows in `All Users`, and `Role Summary` has sane columns and counts. Exits `0` on success and `1` if any check fails, so it can be chained:
+
+```bash
+python3 solace_cloud_export_script.py && python3 verify_export.py
+```
+
+To check a specific run (not necessarily the latest) or a different profile's output tree:
+
+```bash
+python3 verify_export.py --dir output/20260708142530
+python3 verify_export.py --output-dir ./output/sap-aem
 ```
 
 ### All CLI Options
@@ -774,7 +793,8 @@ solace-user-role-export/                              ← committed to Git
 ├── .gitignore
 ├── config.example.yaml                        ← Connection config template
 ├── requirements.txt
-└── solace_cloud_export_script.py              ← Main reusable export script
+├── solace_cloud_export_script.py              ← Main reusable export script
+└── verify_export.py                            ← Post-run output sanity checker
 
 # created locally from templates, gitignored
 ├── config.yaml                                ← Your API token(s)
