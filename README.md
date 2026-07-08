@@ -806,10 +806,10 @@ solace-user-role-export/                              ← committed to Git
 
 ## 17. Sharing Files Outside Git
 
-`README.md` and `solace_cloud_export_script.py` are sometimes bundled into a standalone zip for sharing outside of git (e.g., over email or chat, without requiring repo access). To recreate that bundle:
+`README.md`, `solace_cloud_export_script.py`, and `verify_export.py` are sometimes bundled into a standalone zip for sharing outside of git (e.g., over email or chat, without requiring repo access). To recreate that bundle:
 
 ```bash
-zip "API test README and script.zip" README.md solace_cloud_export_script.py
+zip "API test README and script.zip" README.md solace_cloud_export_script.py verify_export.py
 ```
 
 This zip is not tracked in git (`**.zip` is gitignored) and is not required to use or develop the project — it is purely a convenience export. Regenerate it on demand rather than keeping a stale copy in the repo.

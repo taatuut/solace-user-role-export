@@ -62,4 +62,4 @@ There are no automated tests, linter, or CI configured beyond `verify_export.py`
 
 ## File-sharing convention
 
-The README documents a manual convention of zipping `README.md` + `solace_cloud_export_script.py` together (`API test README and script.zip`) for sharing outside of git. That zip is not kept in the repo (gitignored via `**.zip`) — regenerate it on demand per README section 17 rather than resurrecting a stale copy.
+The README documents a manual convention of zipping `README.md` + `solace_cloud_export_script.py` + `verify_export.py` together (`API test README and script.zip`) for sharing outside of git. That zip is not kept in the repo (gitignored via `**.zip`) — regenerate it on demand per README section 17 rather than resurrecting a stale copy.
