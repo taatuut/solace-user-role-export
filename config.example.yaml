@@ -1,0 +1,45 @@
+# Solace Cloud / SAP AEM — User & Role Export — Configuration Template
+# Copy this file to config.yaml and fill in your token(s).
+# config.yaml is gitignored — never commit credentials.
+#
+# config.yaml is entirely OPTIONAL. Every setting below can also be passed
+# as a CLI flag, and the token can come from the SOLACE_API_TOKEN env var
+# instead. Precedence: CLI flag > config.yaml > env var (token only) >
+# built-in default. See README.md "Configuration" section for details.
+
+# ---------------------------------------------------------------------------
+# Default settings — used when the script is run without --profile
+# ---------------------------------------------------------------------------
+
+# API bearer token (Cloud Console / AEM Cluster Manager → User icon →
+# Token Management). Required unless passed via --token or SOLACE_API_TOKEN.
+token: "your-solace-cloud-api-token"
+
+# Regional API base URL. US is the default; SAP AEM uses the identical base
+# URL and endpoints as Solace Cloud — only the token differs.
+#   US (default)  -> https://api.solace.cloud
+#   EU            -> https://api.eu.solace.cloud   (verify live — see README)
+#   Australia     -> https://api.au.solace.cloud   (verify live — see README)
+#   Asia-Pacific  -> https://api.ap.solace.cloud    (verify live — see README)
+base_url: "https://api.solace.cloud"
+
+# Directory the CSV/Excel/JSON export files are written to
+output_dir: "./output"
+
+# Output format: csv | excel | json | all
+format: "all"
+
+# Separator used between multiple roles in the CSV/Excel output
+role_separator: " | "
+
+# ---------------------------------------------------------------------------
+# Optional named profiles — select with: --profile <name>
+# Useful for a second Solace Cloud organisation, or a SAP AEM tenant (same
+# API, different token). Any key omitted here falls back to the defaults
+# above.
+# ---------------------------------------------------------------------------
+profiles:
+  sap_aem:
+    token: "your-sap-aem-api-token"
+    base_url: "https://api.solace.cloud"   # SAP AEM uses the same API base URL
+    output_dir: "./output/sap-aem"
