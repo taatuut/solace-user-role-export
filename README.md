@@ -727,10 +727,6 @@ This layer was **excluded from this session** per scope agreement. It would be n
 | No native UI export | Operational | Use this script for automated exports |
 | Regional base URLs documented inconsistently across sources | Low — only US confirmed live | Verify live before using a non-US `--base-url` |
 
-**Resolved:**
-- ~~`sap-organization-administrator` vs `administrator`~~ — `is_admin` now recognises both (see section 9).
-- ~~No retry on transient network errors~~ — `_get_with_retry()` retries 429/5xx/connection/timeout failures with backoff before giving up (see section 9); non-retryable errors (e.g. 401/404) still fail immediately.
-
 ### 🔧 Potential Improvements
 
 1. **Schedule the script** — add cron job or GitHub Actions workflow for periodic exports
