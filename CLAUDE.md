@@ -28,14 +28,17 @@ Always invoke Python as `python3` (never bare `python`) and pip as `python3 -m p
 
 `tests/test_export.py` mocks `requests.get` with synthetic fixture data — see README.md's "Running Tests" subsection (in section 10) for what it covers. When changing `load_config()`/`resolve_settings()`, run the precedence tests rather than reasoning about the merge order by hand — it's easy to get backwards. `verify_export.py` is a separate, complementary tool: it checks a *live run's actual output*, not the script's logic — it's not a substitute for `pytest`, and vice versa.
 
+`.github/workflows/test.yml` runs `py_compile` + `pytest` on every push/PR to `main` — see README.md's "Continuous Integration" subsection (in section 10).
+
 ## Architecture
 
 `solace_cloud_export_script.py` is structured as:
 
 - `load_config(path)` — loads `config.yaml` if present, returns `{}` if not. The config file is always optional; the script must keep working with CLI flags / env var alone.
 - `resolve_settings(args, config)` — merges CLI args, an optional named `--profile` section from `config.yaml`, the `SOLACE_API_TOKEN` env var (token only), and built-in defaults, in that precedence order (CLI > config/profile > env var > default). This is the piece most likely to need care when adding a new setting — every new setting needs a slot in `config.example.yaml`, in `resolve_settings()`, and in `parse_args()` with a `None` default (so "not passed" is distinguishable from "passed the same as the default").
-- `fetch_all_users(base_url, token, role_sep)` — pagination loop against `GET /api/v2/platform/users`, stopping when `meta.pagination.nextPage` is `null`. Roles come embedded in each user object; there is no per-user role lookup.
-- `write_csv()` / `write_excel()` / `write_json()` — the three output writers. Excel writes three sheets (All Users, Admins, Role Summary) via `_format_sheet()` for consistent styling.
+- `fetch_all_users(base_url, token, role_sep)` — pagination loop against `GET /api/v2/platform/users` (via `_get_with_retry()`), stopping when `meta.pagination.nextPage` is `null`. Roles come embedded in each user object; there is no per-user role lookup.
+- `_get_with_retry(url, headers, params)` — retries transient failures (connection errors, timeouts, 429/5xx) up to `MAX_ATTEMPTS` with exponential backoff (`RETRY_BACKOFF_SECONDS`); non-retryable HTTP errors (401/403/404/...) fail immediately, no retry.
+- `write_csv()` / `write_excel()` / `write_json()` — the three output writers. Excel writes three sheets (All Users, Admins, Role Summary) via `_format_sheet()` for consistent styling. `write_excel()`'s `role_sep` parameter must match the separator `fetch_all_users()` used — the Role Summary sheet splits on it to recover individual role names from the joined string; passing a mismatched separator silently breaks role counts (this was a real bug before `role_sep` was threaded through from `main()`).
 - `main()` — wires the above together: resolve settings, fail fast if no token, fetch, write.
 
 `verify_export.py` is separate and read-only with respect to `output/` — it never regenerates or modifies export files, only inspects the most recent (or a specified) `output/<yyyymmddhhMMss>/` directory and cross-checks CSV/JSON/Excel against each other. It shares the filename constants (`solace_users_roles.csv/.xlsx/.json`) with the exporter by convention, not by import — keep them in sync manually if either changes.
@@ -48,7 +51,7 @@ Always invoke Python as `python3` (never bare `python`) and pip as `python3 -m p
 
 - `/api/v2/platform/users` is the correct endpoint; `/api/v2/iam/users` (seen in some generic API reference docs) 404s on this API and should not be used.
 - SAP AEM uses the *identical* API base URL and endpoints as Solace Cloud — only the bearer token differs. Confirmed live; see README section 14.
-- SAP AEM's top-level admin role is named `sap-organization-administrator`, not `administrator`. Code that filters/labels admins (`is_admin` in `fetch_all_users`) currently only checks `administrator` — this is a known gap if you're working across both platforms (see README "Findings, Gaps & Improvements").
+- SAP AEM's top-level admin role is named `sap-organization-administrator`, not `administrator`. `is_admin` in `fetch_all_users` checks both (see `ADMIN_ROLES`) — if you add another platform-specific admin role name, extend that set rather than the `"administrator" in roles_list` pattern it replaced.
 - Regional base URLs beyond US are documented inconsistently across Solace's own sources (see README section 3) — treat any non-US `--base-url` as unverified until checked live.
 
 ## Output and data handling

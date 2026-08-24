@@ -378,18 +378,21 @@ solace_cloud_export_script.py
 │
 ├── get_headers()         ← Builds standard auth headers
 │
+├── _get_with_retry()     ← GET with retry + backoff (429/5xx/connection/timeout);
+│   │                        fails fast (no retry) on other HTTP errors, e.g. 401/404
+│
 ├── fetch_all_users()     ← Core pagination loop
-│   └── Calls /api/v2/platform/users repeatedly
+│   └── Calls /api/v2/platform/users repeatedly (via _get_with_retry())
 │   └── Stops when nextPage == null
 │   └── Flattens roles list to separator-delimited string
-│   └── Adds boolean flags: is_admin, is_billing_admin
+│   └── Adds boolean flags: is_admin (administrator OR sap-organization-administrator), is_billing_admin
 │   └── Returns sorted list of user dicts
 │
 ├── write_csv()           ← UTF-8-SIG CSV (Excel-compatible BOM)
 │
-├── write_excel()         ← Multi-sheet .xlsx
+├── write_excel()         ← Multi-sheet .xlsx (role_sep must match fetch_all_users')
 │   ├── Sheet 1: "All Users"     — complete user list
-│   ├── Sheet 2: "Admins"        — filtered: administrator role only
+│   ├── Sheet 2: "Admins"        — filtered: is_admin users
 │   └── Sheet 3: "Role Summary"  — role frequency count
 │
 ├── write_json()          ← Structured JSON with metadata envelope
@@ -452,6 +455,10 @@ pytest
 ```
 
 This is a different, narrower check than `verify_export.py`: the test suite exercises the script's *logic* against fixture data ahead of a change; `verify_export.py` checks a *real run's actual output* after the fact. Run both when making non-trivial changes.
+
+### Continuous Integration
+
+`.github/workflows/test.yml` runs on every push and pull request against `main`: it installs `requirements-dev.txt`, runs the `py_compile` sanity check on both scripts, then runs the full `pytest` suite. It needs no secrets or live API access — the same mocked HTTP layer used locally is what runs in CI. A red check on a PR means either a real regression or an environment difference (e.g. a Python version mismatch) worth looking into before merging.
 
 ### All CLI Options
 
@@ -547,10 +554,10 @@ Each run creates its own subdirectory `output/<yyyymmddhhMMss>/` (UTC timestamp)
 | `last_name` | string | User's last name (may be empty) |
 | `email` | string | Primary email address / login |
 | `state` | string | `ACTIVE` or `INVITED` |
-| `roles` | string | Pipe-separated list of assigned roles |
+| `roles` | string | Assigned roles, joined with `role_separator` (`--role-separator`; default `" | "`) |
 | `role_count` | integer | Number of roles assigned |
 | `groups` | string | Comma-separated group memberships |
-| `is_admin` | boolean | `True` if user has `administrator` role |
+| `is_admin` | boolean | `True` if user has `administrator` (Solace Cloud) or `sap-organization-administrator` (SAP AEM) |
 | `is_billing_admin` | boolean | `True` if user has `billing-administrator` role |
 
 ---
@@ -670,7 +677,7 @@ python3 solace_cloud_export_script.py --profile sap_aem
 
 ### Key Role Difference: `sap-organization-administrator`
 
-In Solace Cloud, the top-level admin role is `administrator`. In SAP AEM, it is replaced by `sap-organization-administrator`. Any automation filtering on `role == "administrator"` must also handle `role == "sap-organization-administrator"` for AEM orgs. Detection can also be done via the `orgType` JWT claim (`SAP` vs `ENTERPRISE`).
+In Solace Cloud, the top-level admin role is `administrator`. In SAP AEM, it is replaced by `sap-organization-administrator`. The export script's `is_admin` flag already handles both (see section 9); any *other* automation you build on top of the raw `roles` column should do the same. Detection can also be done via the `orgType` JWT claim (`SAP` vs `ENTERPRISE`).
 
 ### What to Expect Differently in AEM vs Solace Cloud
 
@@ -687,7 +694,6 @@ In Solace Cloud, the top-level admin role is `administrator`. In SAP AEM, it is 
 
 - **SAP role normalisation** — map `sap-organization-administrator` to a common label when merging exports across platforms.
 - **Detect platform from token** — decode the JWT `orgType` claim to auto-label output as Solace Cloud vs SAP AEM.
-- **Unified `is_admin` logic** — treat `administrator` OR `sap-organization-administrator` as admin when comparing across orgs.
 
 ### SAP BTP XSUAA Layer (Out of Scope This Session)
 
@@ -719,8 +725,11 @@ This layer was **excluded from this session** per scope agreement. It would be n
 | Some users have no `firstName`/`lastName` | Low — email-only accounts, more common in the AEM org | Script handles gracefully (empty string) |
 | Token is a long-lived JWT (no expiry shown) | Security risk | Store in a gitignored `config.yaml` or secrets manager; rotate periodically |
 | No native UI export | Operational | Use this script for automated exports |
-| `sap-organization-administrator` vs `administrator` | Low — only matters for cross-platform admin filtering | Handle both role names, or decode `orgType` (see section 14) |
 | Regional base URLs documented inconsistently across sources | Low — only US confirmed live | Verify live before using a non-US `--base-url` |
+
+**Resolved:**
+- ~~`sap-organization-administrator` vs `administrator`~~ — `is_admin` now recognises both (see section 9).
+- ~~No retry on transient network errors~~ — `_get_with_retry()` retries 429/5xx/connection/timeout failures with backoff before giving up (see section 9); non-retryable errors (e.g. 401/404) still fail immediately.
 
 ### 🔧 Potential Improvements
 
@@ -749,8 +758,11 @@ solace-user-role-export/                     ← committed to Git
 ├── pytest.ini
 ├── solace_cloud_export_script.py              ← Main reusable export script
 ├── verify_export.py                            ← Post-run output sanity checker
-└── tests/
-    └── test_export.py                          ← pytest suite (mocks the HTTP layer)
+├── tests/
+│   └── test_export.py                          ← pytest suite (mocks the HTTP layer)
+└── .github/
+    └── workflows/
+        └── test.yml                            ← CI: runs pytest on push/PR
 
 # created locally from templates, gitignored
 ├── config.yaml                                ← Your API token(s)

@@ -50,6 +50,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -79,6 +80,10 @@ USERS_ENDPOINT  = "/api/v2/platform/users"
 PAGE_SIZE       = 100
 TIMESTAMP       = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")   # yyyymmddhhMMss
 VALID_FORMATS   = ("csv", "excel", "json", "all")
+ADMIN_ROLES     = {"administrator", "sap-organization-administrator"}   # Solace Cloud + SAP AEM
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}   # transient — worth a retry
+MAX_ATTEMPTS    = 3
+RETRY_BACKOFF_SECONDS = 2   # doubles each attempt: 2s, 4s
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -170,6 +175,41 @@ def get_headers(token: str) -> dict:
     }
 
 
+def _get_with_retry(url: str, headers: dict, params: dict, timeout: int = 30):
+    """
+    GET with retry + backoff for transient failures — connection errors,
+    timeouts, and retryable HTTP status codes (429/5xx). Fails immediately
+    (no retry) on non-retryable HTTP errors like 401/403/404, since retrying
+    those wouldn't help. Exits the process if all attempts are exhausted.
+    """
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+            if status not in RETRYABLE_STATUS_CODES or attempt == MAX_ATTEMPTS:
+                body = e.response.text if e.response is not None else str(e)
+                print(f"\n❌ HTTP {status}: {body}")
+                sys.exit(1)
+            reason = f"HTTP {status}"
+        except requests.exceptions.ConnectionError:
+            if attempt == MAX_ATTEMPTS:
+                print(f"\n❌ Connection error — check BASE_URL: {url}")
+                sys.exit(1)
+            reason = "Connection error"
+        except requests.exceptions.Timeout:
+            if attempt == MAX_ATTEMPTS:
+                print(f"\n❌ Timeout")
+                sys.exit(1)
+            reason = "Timeout"
+
+        wait = RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+        print(f"\n   ⚠️  {reason} (attempt {attempt}/{MAX_ATTEMPTS}) — retrying in {wait}s…", end=" ")
+        time.sleep(wait)
+
+
 def fetch_all_users(base_url: str, token: str, role_sep: str = " | ") -> list[dict]:
     """
     Fetch all users from Solace Cloud API with full pagination.
@@ -193,18 +233,7 @@ def fetch_all_users(base_url: str, token: str, role_sep: str = " | ") -> list[di
         print(f"   ↳ Fetching page {page}" +
               (f" of {total_pages}" if total_pages else " (probing…)") + " …", end=" ")
 
-        try:
-            resp = requests.get(url, headers=headers, params=params, timeout=30)
-            resp.raise_for_status()
-        except requests.exceptions.HTTPError:
-            print(f"\n❌ HTTP {resp.status_code}: {resp.text}")
-            sys.exit(1)
-        except requests.exceptions.ConnectionError:
-            print(f"\n❌ Connection error — check BASE_URL: {base_url}")
-            sys.exit(1)
-        except requests.exceptions.Timeout:
-            print(f"\n❌ Timeout on page {page}")
-            sys.exit(1)
+        resp = _get_with_retry(url, headers, params)
 
         payload    = resp.json()
         pagination = payload.get("meta", {}).get("pagination", {})
@@ -230,8 +259,10 @@ def fetch_all_users(base_url: str, token: str, role_sep: str = " | ") -> list[di
                 "roles":         role_sep.join(sorted(roles_list)),
                 "role_count":    len(roles_list),
                 "groups":        ", ".join(user.get("groups", [])),
-                # Boolean helpers for quick filtering
-                "is_admin":      "administrator" in roles_list,
+                # Boolean helpers for quick filtering. is_admin checks both
+                # Solace Cloud's "administrator" and SAP AEM's
+                # "sap-organization-administrator" — see ADMIN_ROLES.
+                "is_admin":      bool(ADMIN_ROLES & set(roles_list)),
                 "is_billing_admin": "billing-administrator" in roles_list,
             })
 
@@ -259,7 +290,7 @@ def write_csv(users: list[dict], filepath: str):
     print(f"📄 CSV   → {filepath}  ({len(users)} rows)")
 
 
-def write_excel(users: list[dict], filepath: str):
+def write_excel(users: list[dict], filepath: str, role_sep: str = " | "):
     """
     Write user list to Excel (.xlsx) with:
     - Frozen header row
@@ -267,6 +298,10 @@ def write_excel(users: list[dict], filepath: str):
     - Auto-fitted column widths
     - Separate 'Admins' sheet for administrator users
     - Separate 'Role Summary' sheet with role frequency count
+
+    role_sep must match the separator used to build each user's 'roles'
+    string (fetch_all_users' role_sep) — the Role Summary sheet splits on
+    it to recover individual role names.
     """
     if not users:
         print("⚠️  No users to write.")
@@ -287,7 +322,7 @@ def write_excel(users: list[dict], filepath: str):
         # Sheet 3: Role frequency summary
         role_counts = {}
         for user in users:
-            for role in user["roles"].split(" | "):
+            for role in user["roles"].split(role_sep):
                 role = role.strip()
                 if role:
                     role_counts[role] = role_counts.get(role, 0) + 1
@@ -379,7 +414,8 @@ def main():
     if fmt in ("csv", "all"):
         write_csv(users,  os.path.join(run_dir, "solace_users_roles.csv"))
     if fmt in ("excel", "all"):
-        write_excel(users, os.path.join(run_dir, "solace_users_roles.xlsx"))
+        write_excel(users, os.path.join(run_dir, "solace_users_roles.xlsx"),
+                    role_sep=settings["role_separator"])
     if fmt in ("json", "all"):
         write_json(users,  os.path.join(run_dir, "solace_users_roles.json"))
 

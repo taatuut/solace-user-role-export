@@ -177,6 +177,24 @@ def test_fetch_all_users_role_separator_is_configurable(monkeypatch):
     assert bob["role_count"] == 2
 
 
+def test_fetch_all_users_sap_admin_role_counts_as_admin(monkeypatch):
+    """Regression test: is_admin must recognize SAP AEM's top-level admin
+    role (sap-organization-administrator), not just Solace Cloud's
+    "administrator" — this was previously a known, documented gap."""
+    sap_admin_user = {
+        "id": "u9", "organizationId": "aem-org", "firstName": "Dana", "lastName": "SAP",
+        "email": "dana.sap@example-sap.com", "roles": ["sap-organization-administrator"],
+        "groups": [], "state": "ACTIVE",
+    }
+
+    def fake_get_single_page(url, headers=None, params=None, timeout=None):
+        return _make_response([sap_admin_user], 1, 1, None)
+
+    monkeypatch.setattr(export_mod.requests, "get", fake_get_single_page)
+    users = export_mod.fetch_all_users("https://api.solace.cloud", "fake-token")
+    assert users[0]["is_admin"] is True
+
+
 # ---------------------------------------------------------------------------
 # Output writers
 # ---------------------------------------------------------------------------
@@ -212,6 +230,112 @@ def test_write_excel(tmp_path, exported_users):
     assert set(wb.sheetnames) == {"All Users", "Admins", "Role Summary"}
     # header row + 1 admin (alice) = 2 rows
     assert wb["Admins"].max_row == 2
+
+
+def test_write_excel_role_summary_respects_custom_separator(tmp_path, monkeypatch):
+    """Regression test: Role Summary used to hardcode ' | ' as the split
+    separator regardless of --role-separator, silently breaking role
+    counts for any other separator (including the README's own
+    documented example, --role-separator ", ")."""
+    monkeypatch.setattr(export_mod.requests, "get", _fake_get)
+    users = export_mod.fetch_all_users("https://api.solace.cloud", "fake-token", role_sep=", ")
+
+    path = tmp_path / "out.xlsx"
+    export_mod.write_excel(users, str(path), role_sep=", ")
+    wb = openpyxl.load_workbook(path)
+
+    role_summary = {
+        row[0]: row[1]
+        for row in wb["Role Summary"].iter_rows(min_row=2, values_only=True)
+    }
+    # bob has 2 roles ("billing-administrator, event-portal-user"); with the
+    # bug, the whole comma-joined string would be counted as one bogus
+    # "role" instead of being split into these two.
+    assert role_summary.get("billing-administrator") == 1
+    assert role_summary.get("event-portal-user") >= 1
+    assert "billing-administrator, event-portal-user" not in role_summary
+
+
+# ---------------------------------------------------------------------------
+# _get_with_retry() — retry/backoff on transient failures
+# ---------------------------------------------------------------------------
+
+def test_get_with_retry_succeeds_first_try(monkeypatch):
+    monkeypatch.setattr(export_mod.requests, "get", _fake_get)
+    resp = export_mod._get_with_retry(
+        "https://api.solace.cloud/api/v2/platform/users",
+        headers={}, params={"pageNumber": 1, "pageSize": 100},
+    )
+    assert resp.json()["data"] == PAGE_1_USERS
+
+
+def test_get_with_retry_recovers_from_connection_error(monkeypatch):
+    monkeypatch.setattr(export_mod.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def flaky_get(url, headers=None, params=None, timeout=None):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise export_mod.requests.exceptions.ConnectionError("boom")
+        return _make_response(PAGE_1_USERS, 1, 1, None)
+
+    monkeypatch.setattr(export_mod.requests, "get", flaky_get)
+    resp = export_mod._get_with_retry("https://api.solace.cloud/x", headers={}, params={})
+    assert resp.json()["data"] == PAGE_1_USERS
+    assert calls["n"] == 2
+
+
+def test_get_with_retry_recovers_from_retryable_http_status(monkeypatch):
+    monkeypatch.setattr(export_mod.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def flaky_get(url, headers=None, params=None, timeout=None):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            resp = MagicMock()
+            resp.status_code = 503
+            resp.text = "Service Unavailable"
+            err = export_mod.requests.exceptions.HTTPError(response=resp)
+            raise err
+        return _make_response(PAGE_1_USERS, 1, 1, None)
+
+    monkeypatch.setattr(export_mod.requests, "get", flaky_get)
+    resp = export_mod._get_with_retry("https://api.solace.cloud/x", headers={}, params={})
+    assert resp.json()["data"] == PAGE_1_USERS
+    assert calls["n"] == 2
+
+
+def test_get_with_retry_does_not_retry_non_retryable_http_status(monkeypatch):
+    """A 404 (or other non-retryable status) must fail immediately —
+    retrying it would never succeed."""
+    monkeypatch.setattr(export_mod.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def always_404(url, headers=None, params=None, timeout=None):
+        calls["n"] += 1
+        resp = MagicMock()
+        resp.status_code = 404
+        resp.text = "Not Found"
+        raise export_mod.requests.exceptions.HTTPError(response=resp)
+
+    monkeypatch.setattr(export_mod.requests, "get", always_404)
+    with pytest.raises(SystemExit):
+        export_mod._get_with_retry("https://api.solace.cloud/x", headers={}, params={})
+    assert calls["n"] == 1
+
+
+def test_get_with_retry_exhausts_attempts_and_exits(monkeypatch):
+    monkeypatch.setattr(export_mod.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def always_timeout(url, headers=None, params=None, timeout=None):
+        calls["n"] += 1
+        raise export_mod.requests.exceptions.Timeout("too slow")
+
+    monkeypatch.setattr(export_mod.requests, "get", always_timeout)
+    with pytest.raises(SystemExit):
+        export_mod._get_with_retry("https://api.solace.cloud/x", headers={}, params={})
+    assert calls["n"] == export_mod.MAX_ATTEMPTS
 
 
 # ---------------------------------------------------------------------------
