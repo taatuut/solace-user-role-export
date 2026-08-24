@@ -530,6 +530,16 @@ python3 solace_cloud_export_script.py --role-separator ", "
 
 > Each run writes into its own `output/<yyyymmddhhMMss>/` subdirectory (UTC timestamp of the run), so successive exports never overwrite or interleave with each other. `output_dir` in `config.yaml` / `--output-dir` sets the parent directory; the script appends the timestamped subdirectory itself.
 
+### Handling Transient Errors
+
+Requests to the API retry automatically on connection errors, timeouts, and `429`/`5xx` responses — up to 3 attempts with exponential backoff. You'll see a line like this if it happens:
+
+```
+   ⚠️  Connection error (attempt 1/3) — retrying in 2s…
+```
+
+Other HTTP errors (e.g. `401 Unauthorized`, `404 Not Found`) fail immediately instead of retrying, since retrying wouldn't help — if you see one of those, check your token or `--base-url` rather than waiting.
+
 ---
 
 ## 11. Output Files
