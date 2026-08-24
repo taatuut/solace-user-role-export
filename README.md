@@ -2,6 +2,8 @@
 
 A Python tool that exports all users and their assigned roles from a Solace Cloud (or SAP AEM) organisation via the Solace Cloud REST API, and writes the result as CSV, Excel, and/or JSON.
 
+> **Disclaimer:** this repo is not officially supported by Solace. All efforts have been made to make this code working and safe, but usage is at your own responsibility.
+
 ## What this project does
 
 Solace Cloud and SAP AEM have no native UI for exporting a complete list of users and their assigned roles — reviewing access (who has admin rights, which roles are actually in use, whether a user's permissions are still appropriate) means manually paging through the console. This project automates that: it pages through the full user list via the platform API, flattens each user's roles into a single record, and produces a CSV/Excel/JSON export ready for access reviews, audits, or onboarding/offboarding checks.
