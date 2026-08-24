@@ -42,7 +42,7 @@ The exercise included:
 - Researching the correct API endpoints from official documentation
 - Discovering and correcting discrepancies between documented and live endpoints
 - Writing a production-quality Python export script
-- Executing it live against the `<tenant>` Solace Cloud organisation, then validating it unmodified against a second, SAP AEM organisation
+- Executing it live against a Solace Cloud organisation (`<tenant>`), then validating it unmodified against a second, SAP AEM organisation
 - Storing all results in structured file formats (CSV, JSON, Excel)
 
 ---
@@ -137,7 +137,7 @@ Two Solace-authored sources documented slightly different regional domain format
 ### Generating an API Token
 
 1. Log in to **Solace Cloud Console** (or SAP AEM Cluster Manager)
-2. Click your **user icon** (top-right corner)
+2. Click your **user icon** (lower-left corner)
 3. Select **Token Management**
 4. Click **Generate Token**
 5. Assign appropriate scopes (minimum: read access to users/platform)
@@ -184,7 +184,7 @@ curl -s \
   "sub":         "<user-id>",
   "apiTokenId":  "<token-id>",
   "iss":         "Solace Corporation",
-  "iat":         1782827408
+  "iat":         "<issued-at-epoch>"
 }
 ```
 
@@ -245,8 +245,8 @@ curl -s \
     {
       "id": "<user-id>",
       "organizationId": "<tenant>",
-      "firstName": "Emil",
-      "lastName": "Zegers",
+      "firstName": "Jane",
+      "lastName": "Doe",
       "email": "jane.doe@example.com",
       "roles": ["administrator"],
       "groups": [],
@@ -258,7 +258,7 @@ curl -s \
     "pagination": {
       "pageNumber": 1,
       "pageSize": 100,
-      "count": 157,
+      "count": "<total-user-count>",
       "totalPages": 2,
       "nextPage": 2
     }
@@ -351,56 +351,7 @@ Any key missing from a profile falls back to the top-level default for that key.
 
 ## 8. Live Execution — Step by Step
 
-This section documents each live API call made during the session.
-
-### Step 1 — Probe Users Endpoint (Page 1)
-
-```bash
-curl -s \
-  -H "Authorization: Bearer $SOLACE_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  "https://api.solace.cloud/api/v2/platform/users?pageSize=100&pageNumber=1"
-```
-
-**Result:**
-- HTTP 200 OK
-- 100 users returned
-- Pagination: page 1 of 2, total 157 users, nextPage=2
-
-### Step 2 — Fetch Remaining Users (Page 2)
-
-```bash
-curl -s \
-  -H "Authorization: Bearer $SOLACE_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  "https://api.solace.cloud/api/v2/platform/users?pageSize=100&pageNumber=2"
-```
-
-**Result:**
-- HTTP 200 OK
-- 57 users returned
-- Pagination: page 2 of 2, nextPage=null (end of data)
-
-### Step 3 — Fetch Roles Catalogue
-
-```bash
-curl -s \
-  -H "Authorization: Bearer $SOLACE_API_TOKEN" \
-  "https://api.solace.cloud/api/v0/organization/roles"
-```
-
-**Result:**
-- HTTP 200 OK
-- ~471 KB JSON response
-- Contains all role definitions with permission details
-
-### Step 4 — Transform & Merge Data
-
-The two pages of user data were:
-1. Flattened using JMESPath: `data[*].{user_id: id, ..., roles: join(', ', roles)}`
-2. Merged via SQL UNION ALL
-3. Sorted by email (case-insensitive)
-4. Exported to CSV (157 rows)
+During development, the endpoints in section 6 were exercised in this order: probe page 1 of `/api/v2/platform/users`, fetch subsequent pages until `nextPage` is `null`, then fetch the role catalogue from `/api/v0/organization/roles`. The results were flattened, sorted by email, and exported to CSV — this is exactly what `solace_cloud_export_script.py` now automates end-to-end (see section 9).
 
 ---
 
@@ -491,6 +442,17 @@ python3 verify_export.py --dir output/20260708142530
 python3 verify_export.py --output-dir ./output/sap-aem
 ```
 
+### Running Tests
+
+`tests/test_export.py` is a pytest suite covering `resolve_settings()`'s precedence logic, `fetch_all_users()`'s pagination/flattening/flag logic, the three output writers, and an end-to-end exporter → `verify_export.py` roundtrip. It mocks the HTTP layer (`requests.get`) with small synthetic fixture data — no live API, no real token, and no network access required:
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+pytest
+```
+
+This is a different, narrower check than `verify_export.py`: the test suite exercises the script's *logic* against fixture data ahead of a change; `verify_export.py` checks a *real run's actual output* after the fact. Run both when making non-trivial changes.
+
 ### All CLI Options
 
 ```bash
@@ -545,15 +507,15 @@ python3 solace_cloud_export_script.py --role-separator ", "
 
    ↳ Fetching page 1 (probing…) … 100 users
 
-   ✅ Organisation total : 157 users across 2 page(s)
+   ✅ Organisation total : 142 users across 2 page(s)
 
-   ↳ Fetching page 2 of 2 … 57 users
+   ↳ Fetching page 2 of 2 … 42 users
 
-✅ Total users retrieved : 157
+✅ Total users retrieved : 142
 
-📄 CSV   → ./output/20260630140736/solace_users_roles.csv  (157 rows)
-📊 Excel → ./output/20260630140736/solace_users_roles.xlsx  (157 users, 3 sheets)
-🗂️  JSON  → ./output/20260630140736/solace_users_roles.json  (157 records)
+📄 CSV   → ./output/20260630140736/solace_users_roles.csv  (142 rows)
+📊 Excel → ./output/20260630140736/solace_users_roles.xlsx  (142 users, 3 sheets)
+🗂️  JSON  → ./output/20260630140736/solace_users_roles.json  (142 records)
 
 ✅ Export complete!
    Files written to: /path/to/output/20260630140736/
@@ -574,19 +536,6 @@ Each run creates its own subdirectory `output/<yyyymmddhhMMss>/` (UTC timestamp)
 | `solace_users_roles.csv` | CSV | All users with roles, UTF-8-SIG encoded |
 | `solace_users_roles.xlsx` | Excel | Multi-sheet: All Users, Admins, Role Summary |
 | `solace_users_roles.json` | JSON | Structured export with metadata envelope |
-
-### Generated During This Session (live artefacts, gitignored under `output/`)
-
-| File | Format | Size | Description |
-|------|--------|------|--------------|
-| `solace_cloud_users_and_roles.csv` | CSV | ~24 KB | **157 users** from live run, sorted by email |
-| `solace_users_response.json` | JSON | ~37 KB | Raw API response — Page 1 (100 users) |
-| `solace_users_page2.json` | JSON | ~21 KB | Raw API response — Page 2 (57 users) |
-| `solace_users_p1_flat.json` | JSON | ~29 KB | Flattened page 1 (intermediate) |
-| `solace_users_p2_flat.json` | JSON | ~17 KB | Flattened page 2 (intermediate) |
-| `solace_org_roles_response.json` | JSON | ~471 KB | Full roles catalogue from v0 API |
-| `solace_iam_users_response.json` | JSON | 114 B | 404 error response (documented) |
-| `solace_iam_roles_response.json` | JSON | 114 B | 404 error response (documented) |
 
 ### CSV Column Definitions
 
@@ -613,22 +562,23 @@ Each run creates its own subdirectory `output/<yyyymmddhhMMss>/` (UTC timestamp)
 | Metric | Value |
 |--------|-------|
 | Organisation | `<tenant>` |
-| Total Users | **157** |
-| Active Users | **156** |
-| Invited (pending) | **1** |
-| Pages of Data | **2** (page 1: 100 users, page 2: 57 users) |
-| Unique Roles Observed | **15** |
+| Total Users | a few hundred |
+| Active Users | the large majority |
+| Invited (pending) | a small number |
+| Pages of Data | multiple (100 users per page) |
+| Unique Roles Observed | most of the available role catalogue (see section 13) |
 | Execution Date | 2026-06-30 |
 
 ### Sample Users
 
+*(illustrative — names and emails below are made up, not real accounts)*
+
 | Name | Email | Roles | State |
 |------|-------|-------|-------|
-| Emil Zegers | jane.doe@example.com | administrator | ACTIVE |
-| Been There | been.there@solace.com | administrator | ACTIVE |
-| Some Body | some.body@solace.com | administrator, event-portal-manager, billing-administrator, micro-integration-manager, messaging-service-editor, mission-control-manager, agentic-ai-manager | ACTIVE |
-| Are You | are.you@solace.com | event-portal-manager, messaging-service-editor, micro-integration-manager, mission-control-manager, agentic-ai-manager | ACTIVE |
-| Jazz Music | jazz.music@solace.com | event-portal-manager, messaging-service-editor, micro-integration-manager, mission-control-manager, agentic-ai-manager | INVITED |
+| Been There | been.there@example.com | administrator | ACTIVE |
+| Some Body | some.body@example.com | administrator, event-portal-manager, billing-administrator, micro-integration-manager, messaging-service-editor, mission-control-manager, agentic-ai-manager | ACTIVE |
+| Are You | are.you@example.com | event-portal-manager, messaging-service-editor, micro-integration-manager, mission-control-manager, agentic-ai-manager | ACTIVE |
+| Jazz Music | jazz.music@example.com | event-portal-manager, messaging-service-editor, micro-integration-manager, mission-control-manager, agentic-ai-manager | INVITED |
 
 ---
 
@@ -670,7 +620,7 @@ SAP Advanced Event Mesh (AEM) is built directly on top of Solace PubSub+ Cloud. 
 SAP AEM Console
       │
       └── Solace Cloud REST API
-              ├── https://api.solace.cloud  (confirmed for both <tenant> and the AEM org)
+              ├── https://api.solace.cloud  (confirmed for both `<tenant>` and the AEM org)
               └── ... (other regions — see section 3)
 ```
 
@@ -680,8 +630,8 @@ Both Solace Cloud and SAP AEM were successfully queried for their full user and 
 
 | Platform | Organisation | Users | Pages | Unique Roles | Script Changes Needed |
 |----------|-------------|-------|-------|---------------|-------------------------|
-| Solace Cloud | `<tenant>` | 157 | 2 | 15 | — (baseline) |
-| SAP AEM | `<id>` | 4 | 1 | 3 | ❌ None |
+| Solace Cloud | `<tenant>` | a few hundred | multiple | most of the catalogue | — (baseline) |
+| SAP AEM | `<id>` | a handful | one | a smaller, SAP-specific subset | ❌ None |
 
 ### Execution Details
 
@@ -691,7 +641,7 @@ Both Solace Cloud and SAP AEM were successfully queried for their full user and 
 | API Base | `https://api.solace.cloud` | `https://api.solace.cloud` (same!) |
 | Endpoint | `GET /api/v2/platform/users` | `GET /api/v2/platform/users` (same!) |
 | Token `orgType` | `ENTERPRISE` | `SAP` |
-| Users | **157** (2 pages) | **4** (1 page) |
+| Users | multiple pages | a single page |
 
 ### Running the Script Against SAP AEM
 
@@ -708,14 +658,15 @@ python3 solace_cloud_export_script.py --profile sap_aem
 
 ### SAP AEM — Complete User List (Live Data)
 
+*(illustrative — names and emails below are made up, not real accounts)*
+
 | # | Email | Roles | State |
 |---|-------|-------|-------|
-| 1 | jane.doe@example.com | sap-organization-administrator, insights-advanced-editor, micro-integration-manager | ACTIVE |
-| 2 | hare.krishna@solace.com | sap-organization-administrator, insights-advanced-editor, micro-integration-manager | ACTIVE |
-| 3 | jan.klaassen@sap.com | sap-organization-administrator, insights-advanced-editor, micro-integration-manager | ACTIVE |
-| 4 | ken.barbie@solace.com | sap-organization-administrator, insights-advanced-editor | ACTIVE |
+| 1 | hare.krishna@example.com | sap-organization-administrator, insights-advanced-editor, micro-integration-manager | ACTIVE |
+| 2 | jan.klaassen@example-sap.com | sap-organization-administrator, insights-advanced-editor, micro-integration-manager | ACTIVE |
+| 3 | ken.barbie@example.com | sap-organization-administrator, insights-advanced-editor | ACTIVE |
 
-**Notable:** `jan.klaassen@sap.com` is a native SAP identity (`@sap.com`), showing that SAP AEM tenants can mix Solace and SAP identity providers in the same org.
+**Notable:** `jan.klaassen@example-sap.com` illustrates a native SAP identity in a different domain than the other, Solace-style accounts — SAP AEM tenants can mix Solace and SAP identity providers in the same org.
 
 ### Key Role Difference: `sap-organization-administrator`
 
@@ -728,7 +679,7 @@ In Solace Cloud, the top-level admin role is `administrator`. In SAP AEM, it is 
 | API Endpoints | Same | Same |
 | Auth Method | Bearer JWT | Bearer JWT |
 | Role Names | Same set | SAP-specific set (fewer roles observed; `sap-organization-administrator` replaces `administrator`) |
-| First/last name presence | ~90% of users | 1 of 4 users (25%) — mostly email-only accounts |
+| First/last name presence | most users | a minority — mostly email-only accounts |
 | User Base | Solace org users | AEM-specific user accounts (can include `@sap.com` identities) |
 | Token Generation | Cloud Console → Token Mgmt | AEM Cluster Manager → Token Mgmt |
 
@@ -787,14 +738,19 @@ This layer was **excluded from this session** per scope agreement. It would be n
 ## 16. File Inventory
 
 ```
-solace-user-role-export/                              ← committed to Git
+solace-user-role-export/                     ← committed to Git
 ├── README.md                                  ← This document
+├── CLAUDE.md                                   ← Guidance for Claude Code/Cowork sessions
 ├── LICENSE
 ├── .gitignore
 ├── config.example.yaml                        ← Connection config template
 ├── requirements.txt
+├── requirements-dev.txt                        ← Adds pytest, for running tests/
+├── pytest.ini
 ├── solace_cloud_export_script.py              ← Main reusable export script
-└── verify_export.py                            ← Post-run output sanity checker
+├── verify_export.py                            ← Post-run output sanity checker
+└── tests/
+    └── test_export.py                          ← pytest suite (mocks the HTTP layer)
 
 # created locally from templates, gitignored
 ├── config.yaml                                ← Your API token(s)
@@ -840,4 +796,4 @@ This zip is not tracked in git (`**.zip` is gitignored) and is not required to u
 ---
 
 *Generated: 2026-06-30 | Session: Solace Cloud User & Role Export Live Exercise*
-*Author: Emil Zegers, Senior Solutions Engineer | Organisation: <tenant>*
+*Author: Emil Zegers, Senior Solutions Engineer | Organisation: `<tenant>`*

@@ -4,34 +4,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A single-purpose Python tool that exports all users and their assigned roles from a Solace Cloud (or SAP AEM) organisation via the Solace Cloud REST API, writing the result as CSV, Excel, and/or JSON. There are two scripts — `solace_cloud_export_script.py` (the exporter) and `verify_export.py` (a post-run output checker) — and no package structure or build step.
+A single-purpose Python tool that exports all users and their assigned roles from a Solace Cloud (or SAP AEM) organisation via the Solace Cloud REST API, writing the result as CSV, Excel, and/or JSON. There are two scripts — `solace_cloud_export_script.py` (the exporter) and `verify_export.py` (a post-run output checker) — plus a small pytest suite in `tests/`, and no package structure or build step.
 
 `README.md` is the canonical, detailed reference (API discovery notes, live results, SAP AEM cross-platform validation, troubleshooting). Read it before making non-trivial changes — this file only covers what's needed to be immediately productive.
 
 ## Commands
 
 ```bash
-# Setup
+# Environment for running tests / compile checks (not for a live export run)
 python3 -m venv .venv && source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-cp config.example.yaml config.yaml   # optional — edit with a real token
-
-# Run
-export SOLACE_API_TOKEN="..."                      # simplest form
-python3 solace_cloud_export_script.py
-python3 solace_cloud_export_script.py --profile sap_aem   # uses config.yaml profiles.sap_aem
-python3 solace_cloud_export_script.py --help       # full flag list
-
-# Verify the most recently generated output/<yyyymmddhhMMss>/ run
-python3 verify_export.py
+python3 -m pip install -r requirements-dev.txt   # requirements.txt + pytest
 
 # Sanity-check changes without hitting the live API
 python3 -m py_compile solace_cloud_export_script.py
+
+# Run the test suite (mocks the HTTP layer — no live API or token needed)
+pytest
 ```
+
+For running an actual export against a live Solace Cloud / SAP AEM org — token setup, `config.yaml`, CLI flags, `verify_export.py` — see README.md section 10, "How to Run the Script." Don't duplicate those instructions here; if they change, update README.md and let this file keep pointing to it rather than restating it (this file drifted out of sync with README once already by doing that).
 
 Always invoke Python as `python3` (never bare `python`) and pip as `python3 -m pip` (never bare `pip`) in code, docstrings, and README — this is a deliberate repo convention, not an oversight, since bare `python`/`pip` can resolve to the wrong interpreter depending on the machine.
 
-There are no automated tests, linter, or CI configured beyond `verify_export.py`, which checks a run's *output* (file presence, cross-format row-count consistency, Excel sheet sanity) rather than the script's logic. When changing `load_config()`/`resolve_settings()`, verify the precedence logic manually (see "Configuration precedence" below) rather than assuming — it's easy to get the merge order backwards.
+`tests/test_export.py` mocks `requests.get` with synthetic fixture data — see README.md's "Running Tests" subsection (in section 10) for what it covers. When changing `load_config()`/`resolve_settings()`, run the precedence tests rather than reasoning about the merge order by hand — it's easy to get backwards. `verify_export.py` is a separate, complementary tool: it checks a *live run's actual output*, not the script's logic — it's not a substitute for `pytest`, and vice versa.
 
 ## Architecture
 

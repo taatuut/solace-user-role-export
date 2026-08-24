@@ -35,7 +35,7 @@ Requirements:
     python3 -m pip install -r requirements.txt   # requests, pandas, openpyxl, PyYAML
 
 Notes:
-  - Confirmed working against Solace Cloud org "<tenant>" (US region, 2026-06-30)
+  - Confirmed working against a live Solace Cloud org (US region, 2026-06-30)
   - Confirmed working unmodified against a second, SAP AEM org (2026-06-30) —
     see README section "SAP AEM — Live Cross-Platform Validation"
   - SAP AEM uses the IDENTICAL API base URL and endpoints — only the bearer
