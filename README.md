@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/taatuut/solace-user-role-export/actions/workflows/test.yml/badge.svg)](https://github.com/taatuut/solace-user-role-export/actions/workflows/test.yml)
 
-A Python tool that exports all users and their assigned roles from a Solace Cloud (or SAP AEM) organisation via the Solace Cloud REST API, and writes the result as CSV, Excel, and/or JSON.
+A Python tool that exports all users and their assigned roles from a Solace Cloud Platform or SAP AEM organisation via the Cloud REST API, and writes the result as CSV, Excel, and/or JSON.
 
 > **Disclaimer:** this repo is not officially supported by Solace. All efforts have been made to make this code working and safe, but usage is at your own responsibility.
 
